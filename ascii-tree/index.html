@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ASCII Christmas Tree</title>
+<style>
+  :root { --bg: #04060b; --panel: #0b0d12; --line: #1a1e27; --dim: #6b7385; --text: #c9d1e0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, "Courier New", monospace; }
+  .app { height: 100vh; height: 100dvh; max-width: 560px; margin: 0 auto; display: flex; flex-direction: column;
+    border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+  .scene { position: relative; flex: 1 1 64%; min-height: 0; cursor: pointer; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hud { position: absolute; left: 12px; bottom: 10px; font-size: 11px; line-height: 1.6; color: #9aa3b5;
+    pointer-events: none; white-space: pre; }
+  .clock { position: absolute; right: 12px; top: 10px; font-size: 11px; color: #ff6b6b; pointer-events: none; }
+  .bar { display: flex; justify-content: space-between; padding: 6px 12px; font-size: 11px; color: #c9d1e0;
+    background: #0e1117; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .bar .run { color: #9aa3b5; }
+  .bar .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #3fd17a;
+    margin-right: 6px; vertical-align: 1px; box-shadow: 0 0 6px #3fd17a; }
+  .code { position: relative; flex: 0 0 34%; overflow: hidden; background: var(--panel); font-size: 13px; }
+  .code-inner { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+  .ln { display: flex; height: 22px; line-height: 22px; white-space: pre; }
+  .ln .n { width: 44px; flex: none; text-align: right; padding-right: 14px; color: #3d4454; }
+  .ln.cur { background: #2a1217; } .ln.cur .n { color: #c96b78; }
+  .code::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(var(--panel), transparent 18%, transparent 82%, var(--panel)); }
+  .kw { color: #ff79a8; } .fn { color: #7ab8ff; } .num { color: #ffae57; } .str { color: #a5e075; }
+  .com { color: #4d5566; font-style: italic; } .self { color: #c3a6ff; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="scene" id="scene" title="Tap to restart">
+    <canvas id="c" aria-label="A rotating 3D Christmas tree made of ASCII letters"></canvas>
+    <div class="clock" id="clock">t 00.00s</div>
+    <div class="hud" id="hud"></div>
+  </div>
+  <div class="bar"><span>py tree.py</span><span class="run"><span class="dot"></span><span id="fps">running · 30 fps</span></span></div>
+  <div class="code" id="code"><div class="code-inner" id="codeInner"></div></div>
+</div>
+<script id="src" type="text/plain">
+#!/usr/bin/env python3
+"""A rotating 3D Christmas tree drawn with ASCII letters.
+
+    pip install numpy
+    python3 tree.py          # Ctrl+C to quit
+"""
+import shutil
+import string
+import sys
+import time
+
+import numpy as np
+
+rng = np.random.default_rng(2026)
+LETTERS = np.array(list(string.ascii_letters + "#%&@$*+"))
+
+Y0, Y1 = 0.40, 2.70          # foliage from Y0 to Y1
+TIERS = 6                    # branch layers
+N_LEAF, N_LIGHTS = 9000, 60
+
+
+def envelope(y):
+    f = np.clip((y - Y0) / (Y1 - Y0), 0, 1)
+    tier = (f * TIERS) % 1.0
+    return (0.04 + 0.92 * (1 - f) ** 1.1) * (0.78 + 0.28 * tier)
+
+
+class Parts:
+    def __init__(s):
+        s.P, s.C, s.ch = [], [], []
+
+    def add(s, pts, col, chars=None):
+        s.P.append(pts)
+        s.C.append(col)
+        s.ch.append(chars if chars is not None else rng.choice(LETTERS, len(pts)))
+
+    def done(s):
+        s.P, s.C, s.ch = np.vstack(s.P), np.vstack(s.C), np.concatenate(s.ch)
+        return s
+
+
+def build():
+    parts = Parts()
+
+    # foliage: points packed toward the outer skin of each tier
+    y = rng.uniform(Y0, Y1, N_LEAF)
+    a = rng.uniform(0, 2 * np.pi, N_LEAF)
+    depth = rng.random(N_LEAF) ** 0.35
+    r = envelope(y) * depth
+    pts = np.c_[r * np.cos(a), y, r * np.sin(a)]
+    f = (y - Y0) / (Y1 - Y0)
+    tier = (f * TIERS) % 1.0
+    snowy = (depth > 0.8) & (rng.random(N_LEAF) < 0.1 + 0.75 * f ** 1.4 + 0.35 * (tier > 0.75))
+    green = np.c_[0.10 + 0.10 * rng.random(N_LEAF), 0.35 + 0.35 * rng.random(N_LEAF), 0.16 + 0.12 * rng.random(N_LEAF)]
+    col = np.where(snowy[:, None], [0.92, 0.95, 1.0], green)
+    parts.add(pts, col)
+
+    # trunk
+    n = 500
+    a, y = rng.uniform(0, 2 * np.pi, n), rng.uniform(0, Y0 + 0.1, n)
+    parts.add(np.c_[0.11 * np.cos(a), y, 0.11 * np.sin(a)], np.tile([0.45, 0.28, 0.14], (n, 1)))
+
+    # ground: concentric rings of dashes
+    rings = []
+    for rad in np.linspace(0.3, 2.1, 18):
+        m = int(rad * 70)
+        a = np.linspace(0, 2 * np.pi, m, endpoint=False)
+        rings.append(np.c_[rad * np.cos(a), np.zeros(m), rad * np.sin(a)])
+    g = np.vstack(rings)
+    parts.add(g, np.tile([0.32, 0.34, 0.40], (len(g), 1)), np.full(len(g), "-"))
+    return parts.done(), np.flatnonzero(depth > 0.9)[:: max(1, int((depth > 0.9).sum() / N_LIGHTS))][:N_LIGHTS]
+
+
+def project(P, angle, cols, rows):
+    c, s = np.cos(angle), np.sin(angle)
+    x = P[:, 0] * c - P[:, 2] * s
+    z = P[:, 0] * s + P[:, 2] * c
+    y = P[:, 1] - 1.2
+    tilt = 0.32                                   # camera looks slightly down
+    y, z = y * np.cos(tilt) - z * np.sin(tilt), y * np.sin(tilt) + z * np.cos(tilt)
+    persp = 4.2 / (4.2 + z)
+    scale = min(rows / 3.3, cols / 6.0)
+    sx = (cols / 2 + x * persp * scale * 2.0).astype(int)   # x2: chars are tall
+    sy = (rows * 0.46 - y * persp * scale).astype(int)
+    return sx, sy, z
+
+
+def render(parts, lights, t, cols, rows, stars):
+    angle = t * 0.45
+    sx, sy, z = project(parts.P, angle, cols, rows)
+    shade = np.clip(1.15 - 0.45 * (z + 1.0), 0.25, 1.2)[:, None]
+    col = np.clip(parts.C * shade, 0, 1)
+    ch = parts.ch.copy()
+
+    lit = min(len(lights), max(0, int((t - 3.0) * 12)))
+    if lit:
+        idx = lights[:lit]
+        palette = np.array([[1, .25, .3], [1, .85, .25], [.3, .7, 1], [1, .45, .85], [1, 1, 1]])
+        blink = (np.sin(t * 5 + idx * 1.7) > -0.3)[:, None]
+        col[idx] = np.where(blink, palette[idx % 5], col[idx] * 0.4)
+        ch[idx] = "o"
+
+    ok = (sx >= 0) & (sx < cols) & (sy >= 0) & (sy < rows)
+    order = np.argsort(-z[ok])                     # far first, near overwrite
+    cell = (sy[ok] * cols + sx[ok])[order]
+    out_ch = np.full(rows * cols, " ", dtype="<U1")
+    out_col = np.zeros((rows * cols, 3))
+    out_ch[stars] = "."
+    out_col[stars] = 0.55 + 0.45 * np.sin(t * 2 + stars)[:, None]
+    out_ch[cell] = ch[ok][order]
+    out_col[cell] = col[ok][order]
+
+    rgb = (out_col * 255).astype(int)
+    lines = []
+    for r in range(rows):
+        row = []
+        for i in range(r * cols, (r + 1) * cols):
+            if out_ch[i] == " ":
+                row.append(" ")
+            else:
+                row.append("\033[38;2;%d;%d;%dm%s" % (*rgb[i], out_ch[i]))
+        lines.append("".join(row) + "\033[0m")
+    hud = "rotation %06.2f°   lights %3d   letters %s   t %05.2fs" % (
+        np.degrees(angle) % 360, lit, f"{int(ok.sum()):,}", t)
+    return "\n".join(lines) + "\n\033[90m" + hud.ljust(cols)[:cols] + "\033[0m"
+
+
+def main():
+    parts, lights = build()
+    sys.stdout.write("\033[?25l\033[2J")
+    start, size, stars = time.time(), None, None
+    try:
+        while True:
+            cols, rows = shutil.get_terminal_size()
+            rows -= 1
+            if size != (cols, rows):
+                size = (cols, rows)
+                stars = rng.choice(cols * rows // 2, max(1, cols * rows // 60), replace=False)
+            t = time.time() - start
+            sys.stdout.write("\033[H" + render(parts, lights, t, cols, rows, stars))
+            sys.stdout.flush()
+            time.sleep(1 / 30)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stdout.write("\033[0m\033[?25h\n")
+
+
+if __name__ == "__main__":
+    main()
+</script>
+<script>
+(() => {
+  // ---------- seeded random ----------
+  let seed = 2026;
+  const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const LETTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ#%&@$*+";
+
+  // ---------- build the tree (same model as tree.py) ----------
+  const Y0 = 0.40, Y1 = 2.70, TIERS = 6, N_LEAF = 16000, N_LIGHTS = 70;
+  const envelope = y => { const f = Math.min(1, Math.max(0, (y - Y0) / (Y1 - Y0)));
+    const tier = (f * TIERS) % 1; return (0.04 + 0.92 * Math.pow(1 - f, 1.1)) * (0.78 + 0.28 * tier); };
+
+  const P = [];   // {x,y,z,r,g,b,ch,kind}
+  const lights = [];
+  for (let i = 0; i < N_LEAF; i++) {
+    const y = Y0 + rnd() * (Y1 - Y0), a = rnd() * Math.PI * 2, d = Math.pow(rnd(), 0.35);
+    const r = envelope(y) * d, f = (y - Y0) / (Y1 - Y0), tier = (f * TIERS) % 1;
+    const snowy = d > 0.8 && rnd() < 0.1 + 0.75 * Math.pow(f, 1.4) + (tier > 0.75 ? 0.35 : 0);
+    const col = snowy ? [0.92, 0.95, 1.0] : [0.10 + 0.10 * rnd(), 0.35 + 0.35 * rnd(), 0.16 + 0.12 * rnd()];
+    P.push({ x: r * Math.cos(a), y, z: r * Math.sin(a), c: col, ch: LETTERS[(rnd() * LETTERS.length) | 0], kind: 0 });
+    if (d > 0.93 && !snowy && f < 0.92 && rnd() < 0.05) lights.push(P.length - 1);
+  }
+  // spread the lights evenly from top to bottom, then keep N_LIGHTS of them
+  lights.sort((a, b) => P[b].y - P[a].y);
+  const step = Math.max(1, Math.floor(lights.length / N_LIGHTS));
+  const LIGHTS = lights.filter((_, i) => i % step === 0).slice(0, N_LIGHTS);
+  for (let i = 0; i < 700; i++) {
+    const a = rnd() * Math.PI * 2, y = rnd() * (Y0 + 0.1);
+    P.push({ x: 0.11 * Math.cos(a), y, z: 0.11 * Math.sin(a), c: [0.45, 0.28, 0.14], ch: LETTERS[(rnd() * 52) | 0], kind: 1 });
+  }
+  for (let k = 0; k < 44; k++) {
+    const rad = 0.3 + k * 0.09, m = Math.floor(rad * 130);
+    for (let j = 0; j < m; j++) {
+      const a = (j / m) * Math.PI * 2;
+      P.push({ x: rad * Math.cos(a), y: 0, z: rad * Math.sin(a), c: [0.30, 0.33, 0.40], ch: "-", kind: 2 });
+    }
+  }
+  const STAR = { x: 0, y: Y1 + 0.08, z: 0 };
+  const PALETTE = [[1, .25, .3], [1, .85, .25], [.3, .7, 1], [1, .45, .85], [1, 1, 1]];
+
+  // ---------- canvas / grid ----------
+  const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  const hud = document.getElementById("hud"), clock = document.getElementById("clock"), fpsEl = document.getElementById("fps");
+  const CW = 5, CH = 8;   // character cell in CSS px
+  let cols, rows, dpr, depth, owner, stars;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    cols = Math.floor(w / CW); rows = Math.floor(h / CH);
+    depth = new Float32Array(cols * rows); owner = new Int32Array(cols * rows);
+    let s = 99; const r2 = () => (s = (s * 16807) % 2147483647) / 2147483647;
+    stars = Array.from({ length: Math.floor(cols * rows / 55) }, () =>
+      ({ x: r2() * cols | 0, y: r2() * rows * 0.7 | 0, p: r2() * 6.28, b: r2() < 0.12 }));
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  function project(p, ca, sa, scale) {
+    const x = p.x * ca - p.z * sa, z0 = p.x * sa + p.z * ca, y0 = p.y - 1.2, tilt = 0.32;
+    const y = y0 * Math.cos(tilt) - z0 * Math.sin(tilt), z = y0 * Math.sin(tilt) + z0 * Math.cos(tilt);
+    const k = 4.2 / (4.2 + z);
+    return [Math.floor(cols / 2 + x * k * scale * (CH / CW)), Math.floor(rows * 0.47 - y * k * scale), z];
+  }
+
+  let start = performance.now(), lastFps = start, frames = 0;
+  document.getElementById("scene").addEventListener("click", () => { start = performance.now(); });
+
+  function draw(now) {
+    const t = (now - start) / 1000, angle = t * 0.45, ca = Math.cos(angle), sa = Math.sin(angle);
+    const scale = Math.min(rows / 3.6, cols * (CW / CH) / 2.4);
+    const W = cv.width, H = cv.height;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#03050a"); g.addColorStop(0.6, "#070b16"); g.addColorStop(1, "#04060b");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = `bold ${CH + 0.5}px ui-monospace, Menlo, Consolas, monospace`;
+    ctx.textBaseline = "top";
+
+    for (const s of stars) {
+      const a = 0.35 + 0.35 * Math.sin(t * 1.6 + s.p);
+      ctx.fillStyle = `rgba(220,230,255,${s.b ? Math.min(1, a + 0.4) : a})`;
+      ctx.fillText(s.b ? "*" : ".", s.x * CW, s.y * CH - 2);
+    }
+
+    depth.fill(1e9); owner.fill(-1);
+    for (let i = 0; i < P.length; i++) {
+      const [sx, sy, z] = project(P[i], ca, sa, scale);
+      if (sx < 0 || sx >= cols || sy < 0 || sy >= rows) continue;
+      const cell = sy * cols + sx;
+      if (z < depth[cell]) { depth[cell] = z; owner[cell] = i; }
+    }
+
+    const lit = Math.min(LIGHTS.length, Math.max(0, Math.floor((t - 3) * 14)));
+    const litSet = new Map();
+    for (let j = 0; j < lit; j++) litSet.set(LIGHTS[j], j);
+
+    let letters = 0;
+    const glows = [];
+    for (let cell = 0; cell < owner.length; cell++) {
+      const i = owner[cell]; if (i < 0) continue;
+      const p = P[i], z = depth[cell];
+      let [r, gg, b] = p.c;
+      let sh = Math.min(1.2, Math.max(0.22, 1.15 - 0.5 * (z + 1)));
+      if (p.kind === 2) sh *= Math.max(0, 1 - Math.hypot(p.x, p.z) / 4.4) * 1.3;
+      let ch = p.ch;
+      if (litSet.has(i)) {
+        const j = litSet.get(i), on = Math.sin(t * 5 + j * 1.7) > -0.3;
+        if (on) { [r, gg, b] = PALETTE[j % 5]; sh = 1.1; ch = "o"; glows.push([cell, PALETTE[j % 5]]); }
+      }
+      if (p.kind !== 2) letters++;
+      const R = Math.min(255, r * sh * 255) | 0, G = Math.min(255, gg * sh * 255) | 0, B = Math.min(255, b * sh * 255) | 0;
+      ctx.fillStyle = `rgb(${R},${G},${B})`;
+      ctx.fillText(ch, (cell % cols) * CW, ((cell / cols) | 0) * CH);
+    }
+
+    ctx.globalCompositeOperation = "lighter";
+    for (const [cell, c] of glows) {
+      const x = (cell % cols) * CW + CW / 2, y = ((cell / cols) | 0) * CH + CH / 2;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, 9);
+      rg.addColorStop(0, `rgba(${c[0] * 255 | 0},${c[1] * 255 | 0},${c[2] * 255 | 0},0.55)`);
+      rg.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = rg; ctx.fillRect(x - 9, y - 9, 18, 18);
+    }
+    if (lit === LIGHTS.length) {   // star on top once every light is on
+      const [sx, sy] = project(STAR, ca, sa, scale);
+      const x = sx * CW + CW / 2, y = sy * CH, pulse = 14 + 4 * Math.sin(t * 4);
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, pulse);
+      rg.addColorStop(0, "rgba(255,230,120,0.9)"); rg.addColorStop(1, "rgba(255,180,0,0)");
+      ctx.fillStyle = rg; ctx.fillRect(x - pulse, y - pulse, pulse * 2, pulse * 2);
+      ctx.fillStyle = "#fff6c0"; ctx.font = `bold ${CH * 2}px ui-monospace, monospace`;
+      ctx.fillText("*", x - CW, y - CH);
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    const deg = ((angle * 180 / Math.PI) % 360).toFixed(2).padStart(6, "0");
+    hud.textContent = `ascii tree · 2026\nrotation ${deg}°     lights ${String(lit).padStart(4)}\nletters ${letters.toLocaleString("en-US")}`;
+    clock.textContent = `t ${t.toFixed(2).padStart(5, "0")}s`;
+    frames++;
+    if (now - lastFps > 1000) { fpsEl.textContent = `running · ${Math.round(frames * 1000 / (now - lastFps))} fps`; frames = 0; lastFps = now; }
+    updateCode(t);
+  }
+
+  // ---------- code panel ----------
+  const SRC = document.getElementById("src").textContent.replace(/^\n/, "").split("\n");
+  const KW = new Set("def class import from return for in if elif else while try except finally pass as with not and or None True False lambda".split(" "));
+  const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  function hl(line) {
+    let out = "", prev = "";
+    const re = /(#.*$)|("""[^"]*"""|"[^"]*"|'[^']*')|(\b\d+\.?\d*(?:e-?\d+)?\b)|([A-Za-z_]\w*)|(\s+)|(.)/g;
+    let m;
+    while ((m = re.exec(line))) {
+      const [tok, com, str, num, id] = m;
+      if (com) out += `<span class="com">${esc(tok)}</span>`;
+      else if (str) out += `<span class="str">${esc(tok)}</span>`;
+      else if (num) out += `<span class="num">${tok}</span>`;
+      else if (id) {
+        if (KW.has(id)) out += `<span class="kw">${id}</span>`;
+        else if (prev === "def" || prev === "class") out += `<span class="fn">${id}</span>`;
+        else if (id === "s" || id === "self") out += `<span class="self">${id}</span>`;
+        else out += esc(id);
+        prev = id; continue;
+      } else out += esc(tok);
+      if (!/^\s+$/.test(tok)) prev = tok;
+    }
+    return out || " ";
+  }
+  const inner = document.getElementById("codeInner"), codeBox = document.getElementById("code");
+  inner.innerHTML = SRC.map((l, i) => `<div class="ln"><span class="n">${i + 1}</span><span>${hl(l)}</span></div>`).join("");
+  const lineEls = inner.children;
+  let curLine = -1;
+  function updateCode(t) {
+    const line = Math.floor(t * 3.2) % SRC.length;   // walk through the source as the scene plays
+    if (line !== curLine) {
+      if (curLine >= 0) lineEls[curLine].classList.remove("cur");
+      lineEls[line].classList.add("cur"); curLine = line;
+    }
+    const target = Math.max(0, line * 22 - codeBox.clientHeight * 0.6);
+    inner.style.transform = `translateY(${-target}px)`;
+  }
+
+  function loop(now) { draw(now); requestAnimationFrame(loop); }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
