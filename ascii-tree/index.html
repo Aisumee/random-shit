@@ -42,7 +42,7 @@
 
   // ---------- the model (same as tree.py) ----------
   const Y0 = 0.45, Y1 = 2.75, TIERS = 5, N_LEAF = 30000, N_LIGHTS = 170, N_BALLS = 26;
-  const LEAF = 0, TRUNK = 1, GARLAND = 2, BALL = 3, GIFT = 4, SKIRT = 5, LIGHT = 6;
+  const LEAF = 0, TRUNK = 1, GARLAND = 2, BALL = 3, GIFT = 4, SKIRT = 5, LIGHT = 6, CAT = 7;
   const GROW = 5.0, GARLANDS = 4.5, BALLS = 5.5, LIGHTS = 5.0, STAR = 8.5, GIFTS = 8.8;
   const envelope = y => { const f = Math.min(1, Math.max(0, (y - Y0) / (Y1 - Y0))), tier = (f * TIERS) % 1;
     return (0.03 + 1.02 * Math.pow(1 - f, 0.95)) * (0.86 + 0.16 * (1 - tier)); };
@@ -83,7 +83,7 @@
   }
   const GIFT_H = [];
   for (const [gx, gz, w, h, dp, col] of [[-0.90, 0.35, .34, .34, .32, [.8, .06, .1]], [0.95, 0.05, .38, .28, .32, [.1, .25, .85]],
-                                         [-0.25, 0.95, .30, .24, .30, [.8, .06, .1]], [0.60, 0.80, .26, .34, .26, [.1, .25, .85]]]) {
+                                         [-0.25, 0.95, .30, .24, .30, [.8, .06, .1]], [0.55, -0.85, .26, .34, .26, [.1, .25, .85]]]) {
     const g = GIFT_H.push(h) - 1;
     for (let i = 0; i < 2600; i++) {             // presents
       const u = [rnd() - 0.5, rnd() - 0.5, rnd() - 0.5]; u[(rnd() * 3) | 0] = rnd() < 0.5 ? -0.5 : 0.5;
@@ -94,6 +94,47 @@
   for (let i = 0; i < 4000; i++) {               // tree skirt
     const r = Math.sqrt(0.0225 + rnd() * (1.3225 - 0.0225)), a = rnd() * 6.2832;
     add(r * Math.cos(a), 0.015, r * Math.sin(a), [0.80 + 0.12 * rnd(), 0.72 + 0.1 * rnd(), 0.56 + 0.1 * rnd()], letter(), SKIRT, r);
+  }
+  // ---------- a sleeping cat, curled up under the branches ----------
+  const CAT_X = 0.72, CAT_Z = 1.12, CAT_ROT = 2.5, CAT_T = GIFTS + 2.2, CAT_S = 1.7, CAT_H = 0.24 * CAT_S;
+  const HEAD = [0.13, 0.075, 0.10];   // in the cat's own coordinates
+  const catAt = (lx, ly, lz) => {     // cat space -> world space
+    const c = Math.cos(CAT_ROT), s = Math.sin(CAT_ROT);
+    lx *= CAT_S; ly *= CAT_S; lz *= CAT_S;
+    return [CAT_X + lx * c - lz * s, ly, CAT_Z + lx * s + lz * c];
+  };
+  const ORANGE = [0.95, 0.55, 0.2], STRIPE = [0.62, 0.30, 0.09], CREAM = [1.0, 0.86, 0.68];
+  const furAt = (lx, lz, light) => {  // tabby stripes run around the curl
+    const a = Math.atan2(lz, lx), c = Math.sin(a * 9) > 0.45 ? STRIPE : light ? CREAM : ORANGE;
+    return c.map(v => v * (0.85 + 0.15 * rnd()));
+  };
+  const addCat = (lx, ly, lz, col, ch) => { const [x, y, z] = catAt(lx, ly, lz); add(x, y, z, col, ch || letter(), CAT, y); };
+  for (let i = 0; i < 2200; i++) {    // body: a soft flattened loaf
+    let nx = gauss(), ny = gauss(), nz = gauss(); const L = Math.hypot(nx, ny, nz); nx /= L; ny /= L; nz /= L;
+    if (ny < -0.2) ny = -0.2;
+    const lx = nx * 0.2, ly = 0.08 + ny * 0.08, lz = nz * 0.15;
+    addCat(lx, Math.max(0.005, ly), lz, furAt(lx, lz, ny < 0 && nz > 0.3));
+  }
+  for (let i = 0; i < 700; i++) {     // head, tucked in against the body
+    let nx = gauss(), ny = gauss(), nz = gauss(); const L = Math.hypot(nx, ny, nz); nx /= L; ny /= L; nz /= L;
+    const front = nx > 0.55 && ny < 0.3;   // muzzle
+    addCat(HEAD[0] + nx * 0.075, HEAD[1] + ny * 0.065, HEAD[2] + nz * 0.07, front ? CREAM : furAt(nx, nz, false));
+  }
+  for (const side of [-1, 1]) {       // ears
+    for (let i = 0; i < 70; i++) {
+      const u = rnd(), v = rnd() * (1 - u);
+      addCat(HEAD[0] + 0.01 + (v - 0.5) * 0.05 * (1 - u), HEAD[1] + 0.05 + u * 0.06, HEAD[2] + side * 0.04 + (rnd() - 0.5) * 0.02 * (1 - u),
+             u > 0.6 ? [0.95, 0.6, 0.6] : ORANGE);
+    }
+  }
+  for (const side of [-1, 1]) {       // closed eyes: two little dark lines
+    addCat(HEAD[0] + 0.07, HEAD[1] + 0.01, HEAD[2] + side * 0.028, [0.15, 0.08, 0.05], "-");
+  }
+  addCat(HEAD[0] + 0.078, HEAD[1] - 0.015, HEAD[2], [1, 0.5, 0.55], "v");   // nose
+  for (let i = 0; i < 600; i++) {     // tail wrapped around the front
+    const a = -0.9 + rnd() * 2.6, r = 0.21 + gauss() * 0.012, th = gauss() * 0.022;
+    const tip = a > 1.4;
+    addCat(Math.cos(a) * r, 0.03 + th, Math.sin(a) * r + th * 0.5, tip ? STRIPE : furAt(Math.cos(a), Math.sin(a), false));
   }
   const N = X.length;
 
@@ -173,6 +214,8 @@
     const nGarl = (t - GARLANDS) / 3, nBall = (t - BALLS) * 5, nLight = (t - LIGHTS) * 36;
     // the skirt spreads out from the trunk, then each present grows up from the floor, one after another
     const skirtR = (t - GIFTS + 0.6) / 0.8 * 1.3;
+    const catY = Math.max(0, Math.min(1, (t - CAT_T) / 1.0)) * (CAT_H + 0.16) - 0.01;
+    const breath = 1 + 0.06 * Math.sin(t * 1.7);
     const giftY = GIFT_H.map((h, g) => Math.max(0, Math.min(1, (t - GIFTS - g * 0.5) / 1.0)) * (h + 0.16) - 0.01);
     const W = cv.width, H = cv.height;
     const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -202,7 +245,9 @@
       else if (k === LIGHT) { if (key >= nLight) continue; lit++; }
       else if (k === GIFT) { if (Y[i] >= giftY[key]) continue; }
       else if (k === SKIRT) { if (key >= skirtR) continue; }
-      project(X[i], Y[i], Z[i], ca, sa);
+      else if (k === CAT) { if (key >= catY) continue;
+        project(X[i], Y[i] * breath, Z[i], ca, sa); }   // gentle breathing
+      if (k !== CAT) project(X[i], Y[i], Z[i], ca, sa);
       if (PX < 0 || PX >= cols || PY < 0 || PY >= rows) continue;
       const cell = PY * cols + PX;
       if (PZ < depth[cell]) { depth[cell] = PZ; owner[cell] = i; }
@@ -221,8 +266,8 @@
         if (k === LEAF) {   // fresh growth is frosted white, so it looks snow-capped while it grows
           const f = Math.max(0, Math.min(1, 1 - (growY - Y[i]) / 0.35));
           r = r * (1 - f) + 0.95 * f; gg = gg * (1 - f) + 0.95 * f; b = b * (1 - f) + 0.95 * f;
-        } else if (k === GIFT || k === SKIRT) {   // presents and skirt get the same frosted growing edge
-          const f = Math.max(0, Math.min(1, k === GIFT ? 1 - (giftY[KEY[i]] - Y[i]) / 0.1 : 1 - (skirtR - KEY[i]) / 0.15));
+        } else if (k === GIFT || k === SKIRT || k === CAT) {   // presents, skirt and cat get the same frosted growing edge
+          const f = Math.max(0, Math.min(1, k === GIFT ? 1 - (giftY[KEY[i]] - Y[i]) / 0.1 : k === CAT ? 1 - (catY - KEY[i]) / 0.1 : 1 - (skirtR - KEY[i]) / 0.15));
           r = r * (1 - f) + 0.95 * f; gg = gg * (1 - f) + 0.95 * f; b = b * (1 - f) + 0.95 * f;
         }
         let sh = Math.max(0.3, Math.min(1.15, 1.15 - 0.42 * (depth[cell] + 1)));
@@ -245,6 +290,7 @@
       ctx.fillStyle = rg; ctx.fillRect(x - 8, y - 8, 16, 16);
     }
     if (t > STAR) drawStar(t, angle, ca, sa);
+    if (t > CAT_T + 1.5) drawZzz(t, ca, sa);
     ctx.globalCompositeOperation = "source-over";
     drawSnow(true);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -252,6 +298,24 @@
     const deg = ((angle * 180 / Math.PI) % 360).toFixed(2).padStart(6, "0");
     hud.textContent = `ascii tree · 2026\nrotation ${deg}°     lights ${String(lit).padStart(4)}\nletters ${letters.toLocaleString("en-US")}`;
     clock.textContent = `t ${t.toFixed(2).padStart(5, "0")}s`;
+  }
+
+  // little "z"s drift up from the cat's head while it's in view
+  function drawZzz(t, ca, sa) {
+    const [hx, hy, hz] = catAt(HEAD[0], HEAD[1] + 0.06, HEAD[2]);
+    project(hx, hy, hz, ca, sa);
+    if (PX < 0 || PX >= cols || PY < 0 || PY >= rows) return;
+    const own = owner[PY * cols + PX];
+    if (PZ > 0.2 && (own < 0 || KIND[own] !== CAT)) return;   // cat is behind the tree
+    const bx = PX * CW, by = PY * CH;
+    for (let j = 0; j < 3; j++) {
+      const p = ((t - CAT_T) / 2.4 + j / 3) % 1;
+      const size = 7 + p * 9, a = Math.sin(p * Math.PI) * 0.9;
+      ctx.font = `bold ${size}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.fillStyle = `rgba(200,220,255,${a})`;
+      ctx.fillText(p > 0.5 ? "Z" : "z", bx + 6 + p * 26 + Math.sin(p * 9) * 3, by - 6 - p * 42);
+    }
+    ctx.font = `bold ${CH + 0.6}px ui-monospace, Menlo, Consolas, monospace`;
   }
 
   function drawStar(t, angle, ca, sa) {
