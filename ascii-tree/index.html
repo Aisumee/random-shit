@@ -81,17 +81,19 @@
     const y = Y0 + 0.05 + rnd() * (Y1 - 0.15 - Y0 - 0.05), [x, , z] = onRing(y, rnd() * 6.2832, 1.04);
     const r = rnd(); add(x, y, z, WARM[r < 0.6 ? 0 : r < 0.9 ? 1 : 2], "o", LIGHT, i);
   }
+  const GIFT_H = [];
   for (const [gx, gz, w, h, dp, col] of [[-0.90, 0.35, .34, .34, .32, [.8, .06, .1]], [0.95, 0.05, .38, .28, .32, [.1, .25, .85]],
                                          [-0.25, 0.95, .30, .24, .30, [.8, .06, .1]], [0.60, 0.80, .26, .34, .26, [.1, .25, .85]]]) {
+    const g = GIFT_H.push(h) - 1;
     for (let i = 0; i < 2600; i++) {             // presents
       const u = [rnd() - 0.5, rnd() - 0.5, rnd() - 0.5]; u[(rnd() * 3) | 0] = rnd() < 0.5 ? -0.5 : 0.5;
       const ribbon = Math.abs(u[0]) < 0.07 || Math.abs(u[2]) < 0.07;
-      add(gx + u[0] * w, (u[1] + 0.5) * h, gz + u[2] * dp, ribbon ? [1, .8, .3] : col, letter(), GIFT, 0);
+      add(gx + u[0] * w, (u[1] + 0.5) * h, gz + u[2] * dp, ribbon ? [1, .8, .3] : col, letter(), GIFT, g);
     }
   }
   for (let i = 0; i < 4000; i++) {               // tree skirt
     const r = Math.sqrt(0.0225 + rnd() * (1.3225 - 0.0225)), a = rnd() * 6.2832;
-    add(r * Math.cos(a), 0.015, r * Math.sin(a), [0.80 + 0.12 * rnd(), 0.72 + 0.1 * rnd(), 0.56 + 0.1 * rnd()], letter(), SKIRT, 0);
+    add(r * Math.cos(a), 0.015, r * Math.sin(a), [0.80 + 0.12 * rnd(), 0.72 + 0.1 * rnd(), 0.56 + 0.1 * rnd()], letter(), SKIRT, r);
   }
   const N = X.length;
 
@@ -168,7 +170,10 @@
     const dt = Math.min(0.1, (now - lastNow) / 1000); lastNow = now;
     const t = (now - start) / 1000, angle = t * 0.32, ca = Math.cos(angle), sa = Math.sin(angle);
     const growY = -0.1 + (Y1 + 0.45) * Math.min(1, t / GROW);
-    const nGarl = (t - GARLANDS) / 3, nBall = (t - BALLS) * 5, nLight = (t - LIGHTS) * 36, gifts = t > GIFTS;
+    const nGarl = (t - GARLANDS) / 3, nBall = (t - BALLS) * 5, nLight = (t - LIGHTS) * 36;
+    // the skirt spreads out from the trunk, then each present grows up from the floor, one after another
+    const skirtR = (t - GIFTS + 0.6) / 0.8 * 1.3;
+    const giftY = GIFT_H.map((h, g) => Math.max(0, Math.min(1, (t - GIFTS - g * 0.5) / 1.0)) * (h + 0.16) - 0.01);
     const W = cv.width, H = cv.height;
     const g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, "#03050a"); g.addColorStop(0.6, "#080c18"); g.addColorStop(1, "#04060b");
@@ -195,7 +200,8 @@
       else if (k === GARLAND) { if (key >= nGarl) continue; }
       else if (k === BALL) { if (key >= nBall) continue; }
       else if (k === LIGHT) { if (key >= nLight) continue; lit++; }
-      else if (!gifts) continue;
+      else if (k === GIFT) { if (Y[i] >= giftY[key]) continue; }
+      else if (k === SKIRT) { if (key >= skirtR) continue; }
       project(X[i], Y[i], Z[i], ca, sa);
       if (PX < 0 || PX >= cols || PY < 0 || PY >= rows) continue;
       const cell = PY * cols + PX;
@@ -214,6 +220,9 @@
         const k = KIND[i];
         if (k === LEAF) {   // fresh growth is frosted white, so it looks snow-capped while it grows
           const f = Math.max(0, Math.min(1, 1 - (growY - Y[i]) / 0.35));
+          r = r * (1 - f) + 0.95 * f; gg = gg * (1 - f) + 0.95 * f; b = b * (1 - f) + 0.95 * f;
+        } else if (k === GIFT || k === SKIRT) {   // presents and skirt get the same frosted growing edge
+          const f = Math.max(0, Math.min(1, k === GIFT ? 1 - (giftY[KEY[i]] - Y[i]) / 0.1 : 1 - (skirtR - KEY[i]) / 0.15));
           r = r * (1 - f) + 0.95 * f; gg = gg * (1 - f) + 0.95 * f; b = b * (1 - f) + 0.95 * f;
         }
         let sh = Math.max(0.3, Math.min(1.15, 1.15 - 0.42 * (depth[cell] + 1)));
